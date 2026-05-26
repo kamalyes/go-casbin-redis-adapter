@@ -1,5 +1,5 @@
-github.com/alicebob/miniredis/v2 v2.35.0 h1:QwLphYqCEAo1eu1TqPRN2jgVMPBweeQcR21jeqDCONI=
-github.com/alicebob/miniredis/v2 v2.35.0/go.mod h1:TcL7YfarKPGDAthEtl5NBeHZfeUQj6OXMm/+iu5cLMM=
+github.com/alicebob/miniredis/v2 v2.38.0 h1:nZAzCR+Lj+Vxk4ZXzm2NuKq2O33RXj1XxJ2e2uP9jiw=
+github.com/alicebob/miniredis/v2 v2.38.0/go.mod h1:TcL7YfarKPGDAthEtl5NBeHZfeUQj6OXMm/+iu5cLMM=
 github.com/bsm/ginkgo/v2 v2.12.0 h1:Ny8MWAHyOepLGlLKYmXG4IEkioBysk6GpaRTLC8zwWs=
 github.com/bsm/ginkgo/v2 v2.12.0/go.mod h1:SwYbGRRDovPVboqFv0tPTcG1sN61LM1Z4ARdbAV9g4c=
 github.com/bsm/gomega v1.27.10 h1:yeMWxP2pV2fG3FgAODIY8EiRE3dy0aeFYt4l7wh6yKA=
@@ -22,8 +22,8 @@ github.com/kamalyes/go-argus v0.1.0 h1:4Ba0EZCSL7+biEiYhIowGaYUXnP2jCu/M9DNV6fLo
 github.com/kamalyes/go-argus v0.1.0/go.mod h1:dG5ttCh6wVn1u5qq4NEvoFtibgQ5Bj3PT8rw7HKX8c0=
 github.com/kamalyes/go-cachex v0.2.1 h1:qh9CqLyTU6pJnL8sAOV+NPoDhrrCpKQOh+Kcn6ry5WE=
 github.com/kamalyes/go-cachex v0.2.1/go.mod h1:q7EyLAwHbhK1o4amzq8Bxkp2/JzRp3uaWWqOIU2n8hY=
-github.com/kamalyes/go-casbin v0.1.0 h1:GFJmrUot/UXt7k2lVp03BeqbAIocmlCpbS2whc63dy8=
-github.com/kamalyes/go-casbin v0.1.0/go.mod h1:iBYjF1Njc2ElEM2ZUkpriFHdBoG2eZi2jQMEMSZgORo=
+github.com/kamalyes/go-casbin v0.1.2 h1:W4nzCdzlCvFStf0xF/AQmQbUXg+2LDWqsbo+xsxD67U=
+github.com/kamalyes/go-casbin v0.1.2/go.mod h1:iBYjF1Njc2ElEM2ZUkpriFHdBoG2eZi2jQMEMSZgORo=
 github.com/kamalyes/go-logger v0.5.0 h1:VKpx5Fdf+a232g+du4Dexpu3Qc0WOpXMNZQI2LYEEZY=
 github.com/kamalyes/go-logger v0.5.0/go.mod h1:QPDNbA0OP1oeTBk6ZCkzIrljX3iFxRyV9FCupFGUHuA=
 github.com/kamalyes/go-toolbox v0.15.0 h1:LqdikKi3DbwAlEdZy9T9usBVEZqpUHTBA8xOzFpzWj8=

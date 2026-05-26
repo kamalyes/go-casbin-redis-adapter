@@ -26,16 +26,126 @@ import (
 
 // 编译时接口断言，确保 Adapter 实现了所有必需的接口
 var (
-	_ policy.Adapter          = (*Adapter)(nil) // 基础适配器接口
-	_ policy.FilteredAdapter  = (*Adapter)(nil) // 过滤适配器接口
-	_ policy.BatchAdapter     = (*Adapter)(nil) // 批量操作适配器接口
-	_ policy.UpdatableAdapter = (*Adapter)(nil) // 可更新适配器接口
+	_ policy.Adapter                      = (*Adapter)(nil) // 基础适配器接口
+	_ policy.FilteredAdapter              = (*Adapter)(nil) // 过滤适配器接口
+	_ policy.BatchAdapter                 = (*Adapter)(nil) // 批量操作适配器接口
+	_ policy.UpdatableAdapter             = (*Adapter)(nil) // 可更新适配器接口
+	_ policy.PTypeUpdatableAdapter        = (*Adapter)(nil) // 按 ptype 精确更新接口
+	_ policy.PTypeUpdatableContextAdapter = (*Adapter)(nil) // 带上下文的 ptype 精确更新接口
 )
+
+// replaceFilteredPoliciesScript 在 Redis 服务端原子完成过滤替换。
+// 相比先 LoadPolicy 到 Go 进程再 Pipeline 写回，这里把“查旧、删旧、写新、重建类型索引”压缩成一次 EVAL。
+// fieldIndex 的语义与 Casbin adapter 保持一致：0 表示 V0，而不是 p_type。
+var replaceFilteredPoliciesScript = redis.NewScript(`
+local set_key = KEYS[1]
+local type_key = KEYS[2]
+
+local key_prefix = ARGV[1]
+local ttl_ms = tonumber(ARGV[2])
+local ptype_filter = ARGV[3]
+local field_index = tonumber(ARGV[4])
+local filter_count = tonumber(ARGV[5])
+local cursor = 6
+
+local function trim(s)
+	return (s:gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+local function split_policy(line)
+	local parts = {}
+	local start_pos = 1
+	while true do
+		local comma = string.find(line, ",", start_pos, true)
+		if comma == nil then
+			table.insert(parts, trim(string.sub(line, start_pos)))
+			break
+		end
+		table.insert(parts, trim(string.sub(line, start_pos, comma - 1)))
+		start_pos = comma + 1
+	end
+	return parts
+end
+
+local function policy_key(line)
+	local parts = split_policy(line)
+	return key_prefix .. table.concat(parts, ":")
+end
+
+local filters = {}
+for i = 1, filter_count do
+	filters[i] = ARGV[cursor]
+	cursor = cursor + 1
+end
+
+local add_count = tonumber(ARGV[cursor])
+cursor = cursor + 1
+
+local function matches(line)
+	local parts = split_policy(line)
+	if ptype_filter ~= "" and parts[1] ~= ptype_filter then
+		return false
+	end
+	for i = 1, filter_count do
+		local idx = field_index + i + 1
+		if parts[idx] ~= filters[i] then
+			return false
+		end
+	end
+	return true
+end
+
+local removed = 0
+local keys = redis.call("SMEMBERS", set_key)
+for _, key in ipairs(keys) do
+	local line = redis.call("GET", key)
+	if line == false then
+		redis.call("SREM", set_key, key)
+	elseif matches(line) then
+		redis.call("DEL", key)
+		redis.call("SREM", set_key, key)
+		removed = removed + 1
+	end
+end
+
+local added = 0
+for i = 1, add_count do
+	local line = ARGV[cursor]
+	cursor = cursor + 1
+	local parts = split_policy(line)
+	if ptype_filter == "" or parts[1] == ptype_filter then
+		local key = policy_key(line)
+		if ttl_ms > 0 then
+			redis.call("SET", key, line, "PX", ttl_ms)
+		else
+			redis.call("SET", key, line)
+		end
+		redis.call("SADD", set_key, key)
+		added = added + 1
+	end
+end
+
+redis.call("DEL", type_key)
+keys = redis.call("SMEMBERS", set_key)
+for _, key in ipairs(keys) do
+	local line = redis.call("GET", key)
+	if line == false then
+		redis.call("SREM", set_key, key)
+	else
+		local parts = split_policy(line)
+		if parts[1] ~= nil and parts[1] ~= "" then
+			redis.call("SADD", type_key, parts[1])
+		end
+	end
+end
+
+return {removed, added}
+`)
 
 // Adapter 基于 Redis 的策略存储适配器
 // 使用 Redis 的 String + Set 数据结构存储策略
 // 支持分布式缓存、TTL 过期、自定义 Key 前缀（多租户隔离）
-// 所有写操作使用 Pipeline 批量执行，减少网络往返
+// 普通写操作使用 Pipeline 批量执行，过滤替换操作使用 Lua 原子执行
 type Adapter struct {
 	client   *redis.Client  // Redis 客户端
 	handler  cachex.Handler // go-cachex 处理器（用于缓存管理）
@@ -151,7 +261,9 @@ func (a *Adapter) SavePolicyWithCtx(ctx context.Context, policies []string) erro
 		key := a.keys.PolicyKey(p)
 		pipe.Set(ctx, key, p, a.ttl)
 		pipe.SAdd(ctx, a.keys.SetKey(), key)
-		typeSet[policy.ExtractPType(p)] = struct{}{}
+		if ptype := policy.ExtractPType(p); ptype != "" {
+			typeSet[ptype] = struct{}{}
+		}
 	}
 
 	// 记录策略类型集合
@@ -176,7 +288,9 @@ func (a *Adapter) AddPolicyWithCtx(ctx context.Context, line string) error {
 	pipe := a.client.Pipeline()
 	pipe.Set(ctx, key, line, a.ttl)
 	pipe.SAdd(ctx, a.keys.SetKey(), key)
-	pipe.SAdd(ctx, a.keys.TypeKey(), policy.ExtractPType(line))
+	if ptype := policy.ExtractPType(line); ptype != "" {
+		pipe.SAdd(ctx, a.keys.TypeKey(), ptype)
+	}
 
 	if _, err := pipe.Exec(ctx); err != nil {
 		return errors.NewPolicyAddFailedError(err.Error())
@@ -218,7 +332,9 @@ func (a *Adapter) AddPoliciesWithCtx(ctx context.Context, lines []string) error 
 		key := a.keys.PolicyKey(line)
 		pipe.Set(ctx, key, line, a.ttl)
 		pipe.SAdd(ctx, a.keys.SetKey(), key)
-		pipe.SAdd(ctx, a.keys.TypeKey(), policy.ExtractPType(line))
+		if ptype := policy.ExtractPType(line); ptype != "" {
+			pipe.SAdd(ctx, a.keys.TypeKey(), ptype)
+		}
 	}
 
 	if _, err := pipe.Exec(ctx); err != nil {
@@ -267,7 +383,9 @@ func (a *Adapter) UpdatePolicyWithCtx(ctx context.Context, oldLine, newLine stri
 	// 添加新策略
 	pipe.Set(ctx, newKey, newLine, a.ttl)
 	pipe.SAdd(ctx, a.keys.SetKey(), newKey)
-	pipe.SAdd(ctx, a.keys.TypeKey(), policy.ExtractPType(newLine))
+	if ptype := policy.ExtractPType(newLine); ptype != "" {
+		pipe.SAdd(ctx, a.keys.TypeKey(), ptype)
+	}
 
 	if _, err := pipe.Exec(ctx); err != nil {
 		return errors.NewPolicyUpdateFailedError(err.Error())
@@ -297,7 +415,9 @@ func (a *Adapter) UpdatePoliciesWithCtx(ctx context.Context, oldLines, newLines 
 		// 添加新策略
 		pipe.Set(ctx, newKey, newLines[i], a.ttl)
 		pipe.SAdd(ctx, a.keys.SetKey(), newKey)
-		pipe.SAdd(ctx, a.keys.TypeKey(), policy.ExtractPType(newLines[i]))
+		if ptype := policy.ExtractPType(newLines[i]); ptype != "" {
+			pipe.SAdd(ctx, a.keys.TypeKey(), ptype)
+		}
 	}
 
 	if _, err := pipe.Exec(ctx); err != nil {
@@ -308,30 +428,22 @@ func (a *Adapter) UpdatePoliciesWithCtx(ctx context.Context, oldLines, newLines 
 }
 
 // UpdateFilteredPoliciesWithCtx 根据字段索引过滤后更新策略
-// 先加载所有策略，过滤出匹配的旧策略并删除，再插入新策略
+// 优先从 newLines 推断单一 ptype；无法推断时按历史兼容语义更新所有 ptype 中匹配的策略
 func (a *Adapter) UpdateFilteredPoliciesWithCtx(ctx context.Context, newLines []string, fieldIndex int, fieldValues ...string) error {
-	// 加载所有策略
-	policies, err := a.LoadPolicyWithCtx(ctx)
-	if err != nil {
-		return err
+	if ptype := policy.InferPType(newLines); ptype != "" {
+		return a.UpdateFilteredPoliciesByPTypeWithCtx(ctx, ptype, newLines, fieldIndex, fieldValues...)
 	}
+	return a.replaceFilteredPoliciesWithLua(ctx, "", newLines, fieldIndex, fieldValues...)
+}
 
-	// 过滤出需要删除的策略
-	toRemove := policy.FilterPoliciesByIndex(policies, fieldIndex, fieldValues...)
-	if len(toRemove) > 0 {
-		if err := a.RemovePoliciesWithCtx(ctx, toRemove); err != nil {
-			return err
-		}
+// UpdateFilteredPoliciesByPTypeWithCtx 根据策略类型（p/g）和字段索引过滤后更新策略
+// 删除旧策略与插入新策略由 Redis Lua 脚本原子完成，避免更新 g 时误删 p
+func (a *Adapter) UpdateFilteredPoliciesByPTypeWithCtx(ctx context.Context, ptype string, newLines []string, fieldIndex int, fieldValues ...string) error {
+	ptype = strings.TrimSpace(ptype)
+	if ptype == "" {
+		return a.UpdateFilteredPoliciesWithCtx(ctx, newLines, fieldIndex, fieldValues...)
 	}
-
-	// 插入新策略
-	if len(newLines) > 0 {
-		if err := a.AddPoliciesWithCtx(ctx, newLines); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return a.replaceFilteredPoliciesWithLua(ctx, ptype, policy.FilterPoliciesByPType(newLines, ptype), fieldIndex, fieldValues...)
 }
 
 // LoadFilteredPolicyWithCtx 根据过滤条件从 Redis 加载策略
@@ -361,20 +473,13 @@ func (a *Adapter) LoadFilteredPolicyWithCtx(ctx context.Context, filter interfac
 }
 
 // RemoveFilteredPolicyWithCtx 根据字段索引和值删除匹配的策略
+// 通过 Lua 在 Redis 侧完成过滤和删除，fieldIndex=0 表示 V0
 func (a *Adapter) RemoveFilteredPolicyWithCtx(ctx context.Context, fieldIndex int, fieldValues ...string) error {
-	policies, err := a.LoadPolicyWithCtx(ctx)
-	if err != nil {
+	if err := a.replaceFilteredPoliciesWithLua(ctx, "", nil, fieldIndex, fieldValues...); err != nil {
 		return err
 	}
 
-	toRemove := policy.FilterPoliciesByIndex(policies, fieldIndex, fieldValues...)
-	if len(toRemove) > 0 {
-		if err := a.RemovePoliciesWithCtx(ctx, toRemove); err != nil {
-			return err
-		}
-	}
-
-	a.logger.DebugKV("Filtered policies removed from Redis", "count", len(toRemove))
+	a.logger.DebugKV("Filtered policies removed from Redis", "field_index", fieldIndex)
 	return nil
 }
 
@@ -386,9 +491,8 @@ func (a *Adapter) GetPolicyByPTypeWithCtx(ctx context.Context, ptype string) ([]
 	}
 
 	result := make([]string, 0)
-	prefix := ptype + ","
 	for _, p := range policies {
-		if strings.HasPrefix(strings.TrimSpace(p), prefix) {
+		if policy.ExtractPType(p) == ptype {
 			result = append(result, p)
 		}
 	}
@@ -445,6 +549,11 @@ func (a *Adapter) UpdateFilteredPolicies(newLines []string, fieldIndex int, fiel
 	return a.UpdateFilteredPoliciesWithCtx(context.Background(), newLines, fieldIndex, fieldValues...)
 }
 
+// UpdateFilteredPoliciesByPType 根据策略类型（p/g）过滤后更新策略（无上下文）
+func (a *Adapter) UpdateFilteredPoliciesByPType(ptype string, newLines []string, fieldIndex int, fieldValues ...string) error {
+	return a.UpdateFilteredPoliciesByPTypeWithCtx(context.Background(), ptype, newLines, fieldIndex, fieldValues...)
+}
+
 // LoadFilteredPolicy 根据过滤条件加载策略（无上下文）
 func (a *Adapter) LoadFilteredPolicy(filter interface{}) ([]string, error) {
 	return a.LoadFilteredPolicyWithCtx(context.Background(), filter)
@@ -480,6 +589,35 @@ func (a *Adapter) Close() error {
 // 可用于执行自定义 Redis 命令
 func (a *Adapter) GetClient() *redis.Client {
 	return a.client
+}
+
+// replaceFilteredPoliciesWithLua 使用 Lua 原子替换过滤后的策略
+// ptype 为空时保持旧接口兼容：跨所有 ptype 匹配；非空时只替换指定 ptype
+func (a *Adapter) replaceFilteredPoliciesWithLua(ctx context.Context, ptype string, newLines []string, fieldIndex int, fieldValues ...string) error {
+	ctx = contextx.OrBackground(ctx)
+
+	ttlMS := int64(0)
+	if a.ttl > 0 {
+		ttlMS = a.ttl.Milliseconds()
+		if ttlMS == 0 {
+			ttlMS = 1
+		}
+	}
+
+	args := make([]interface{}, 0, 6+len(fieldValues)+len(newLines))
+	args = append(args, a.keys.prefix, ttlMS, strings.TrimSpace(ptype), fieldIndex, len(fieldValues))
+	for _, value := range fieldValues {
+		args = append(args, value)
+	}
+	args = append(args, len(newLines))
+	for _, line := range newLines {
+		args = append(args, line)
+	}
+
+	if err := replaceFilteredPoliciesScript.Run(ctx, a.client, []string{a.keys.SetKey(), a.keys.TypeKey()}, args...).Err(); err != nil {
+		return errors.NewPolicyBatchUpdateFailedError(err.Error())
+	}
+	return nil
 }
 
 // clearAll 清空 Redis 中所有策略数据
