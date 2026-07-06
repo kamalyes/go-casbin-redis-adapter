@@ -26,12 +26,12 @@ github.com/kamalyes/go-argus v0.2.1 h1:OYIrKjNtjbGCBcVKPS1poNCegvgwJYOfXVp/8+x/t
 github.com/kamalyes/go-argus v0.2.1/go.mod h1:dG5ttCh6wVn1u5qq4NEvoFtibgQ5Bj3PT8rw7HKX8c0=
 github.com/kamalyes/go-cachex v0.2.3 h1:unzGrbX9kU86WiNfdA4uhlBy6YfxvphBEEvsZopM0ms=
 github.com/kamalyes/go-cachex v0.2.3/go.mod h1:Ft1vgswVXemr2C6S0YB0gIuqUkqAzcoGp+S2QIe4VaI=
-github.com/kamalyes/go-casbin v0.1.2 h1:W4nzCdzlCvFStf0xF/AQmQbUXg+2LDWqsbo+xsxD67U=
-github.com/kamalyes/go-casbin v0.1.2/go.mod h1:iBYjF1Njc2ElEM2ZUkpriFHdBoG2eZi2jQMEMSZgORo=
+github.com/kamalyes/go-casbin v0.1.5 h1:WM1a+/vtsdKHOHSX6/U8MEUB+ijKHEhVbp96+TQwspk=
+github.com/kamalyes/go-casbin v0.1.5/go.mod h1:jq2DQs7xaaJY5q4mElQgPaB2N+rcswLrujphNgo4LHY=
 github.com/kamalyes/go-logger v0.5.3 h1:srnQfqhrSLqT1ZBnEJbmzhml5uJCYdO+2BlCkxkAvg8=
 github.com/kamalyes/go-logger v0.5.3/go.mod h1:F5gQ6jKubk+fSzig+dPJWB1We2dta6xFA8l5YLPjymE=
-github.com/kamalyes/go-toolbox v0.15.3 h1:dQbKyFjWq1QaiNcHI37zML0Nla+4z/7iydjjETj7lYE=
-github.com/kamalyes/go-toolbox v0.15.3/go.mod h1:Mepa3KH5/brwYVgxZB7UkiLrSG8loHwfUPAQWRNMJiM=
+github.com/kamalyes/go-toolbox v0.15.4-0.20260702123509-97fc880b05cd h1:pQDldEc9RxGHUrv7TbqJDXShxpnfv9iepdcOexi9YzI=
+github.com/kamalyes/go-toolbox v0.15.4-0.20260702123509-97fc880b05cd/go.mod h1:BNzWEKmfxKbCuDy1100DmSI4FwqSzm9Pe5H78yREAKE=
 github.com/klauspost/cpuid/v2 v2.2.7 h1:ZWSB3igEs+d0qvnxR/ZBzXVmxkgt8DdzP6m9pfuVLDM=
 github.com/klauspost/cpuid/v2 v2.2.7/go.mod h1:Lcz8mBdAVJIBVzewtcLocK12l3Y+JytZYpaMropDUws=
 github.com/kr/pretty v0.3.1 h1:flRD4NNwYAUpkphVc1HcthR4KEIFJ65n8Mw5qdRn3LE=

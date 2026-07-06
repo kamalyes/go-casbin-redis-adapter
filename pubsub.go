@@ -23,6 +23,7 @@ import (
 	"github.com/kamalyes/go-logger"
 	"github.com/kamalyes/go-toolbox/pkg/idgen"
 	"github.com/kamalyes/go-toolbox/pkg/retry"
+	"github.com/kamalyes/go-toolbox/pkg/syncx"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -47,11 +48,15 @@ type RedisNotifier struct {
 	idgen  idgen.IDGenerator      // ID 生成器（用于事件唯一 ID）
 	retry  *retry.Retry           // 发布重试器
 
-	mu      sync.RWMutex              // 保护以下字段
-	running bool                      // 是否正在运行
-	cancel  context.CancelFunc        // 取消订阅的函数
-	handler policy.ChangeEventHandler // 事件处理函数
-	sub     *redis.PubSub             // Redis 订阅对象
+	mu           sync.RWMutex              // 保护以下字段
+	running      bool                      // 是否正在运行
+	cancel       context.CancelFunc        // 取消订阅的函数
+	handler      policy.ChangeEventHandler // 事件处理函数
+	sub          *redis.PubSub             // Redis 订阅对象
+	eventCh      chan *ChangeEvent         // 事件缓冲队列，receiveLoop 非阻塞投递
+	workerCtx    context.Context           // 事件处理循环 context
+	workerCancel context.CancelFunc        // 事件处理循环取消函数
+	wg           sync.WaitGroup            // 等待事件处理循环退出
 }
 
 // NewRedisNotifier 创建 Redis Pub/Sub 通知器
@@ -80,6 +85,8 @@ func NewRedisNotifier(client *redis.Client, opts ...policy.NotifierOption) (*Red
 		config.Source = fmt.Sprintf("node-%s", idgen.NewIDGenerator(idgen.GeneratorTypeUUID).GenerateRequestID())
 	}
 
+	workerCtx, workerCancel := context.WithCancel(context.Background())
+
 	return &RedisNotifier{
 		client: client,
 		config: config,
@@ -88,6 +95,9 @@ func NewRedisNotifier(client *redis.Client, opts ...policy.NotifierOption) (*Red
 		retry: retry.NewRetry().
 			SetAttemptCount(config.RetryCount).
 			SetInterval(config.RetryInterval),
+		eventCh:      make(chan *ChangeEvent, 128),
+		workerCtx:    workerCtx,
+		workerCancel: workerCancel,
 	}, nil
 }
 
@@ -139,7 +149,7 @@ func (rn *RedisNotifier) Publish(ctx context.Context, event *ChangeEvent) error 
 
 // Subscribe 订阅策略变更事件
 // 启动后台 goroutine 持续监听 Redis 频道
-// 收到事件后反序列化并调用 handler 处理
+// 收到事件后非阻塞投递到 eventCh，由 syncx.EventLoop 异步处理
 // 自动过滤自身发布的事件（基于 Source 字段）
 func (rn *RedisNotifier) Subscribe(ctx context.Context, handler policy.ChangeEventHandler) error {
 	rn.mu.Lock()
@@ -157,8 +167,16 @@ func (rn *RedisNotifier) Subscribe(ctx context.Context, handler policy.ChangeEve
 	// 订阅 Redis 频道
 	rn.sub = rn.client.Subscribe(subCtx, rn.config.Channel)
 
-	// 启动消息接收循环
-	go rn.receiveLoop(subCtx)
+	// 启动事件处理循环（syncx.EventLoop，内置 panic 恢复和优雅关闭）
+	rn.startEventLoop()
+
+	// 启动消息接收循环（syncx.Go 统一 panic 恢复，receiveLoop 内部阻塞调用 ReceiveMessage 不适合 EventLoop）
+	syncx.Go(subCtx).
+		OnPanic(func(r interface{}) {
+			rn.logger.ErrorKV("Redis receiveLoop panic recovered",
+				"panic", fmt.Sprintf("%v", r))
+		}).
+		Exec(func() { rn.receiveLoop(subCtx) })
 
 	rn.logger.InfoKV("Redis notifier subscribed",
 		"channel", rn.config.Channel,
@@ -171,9 +189,9 @@ func (rn *RedisNotifier) Subscribe(ctx context.Context, handler policy.ChangeEve
 // Unsubscribe 取消订阅策略变更事件
 func (rn *RedisNotifier) Unsubscribe() error {
 	rn.mu.Lock()
-	defer rn.mu.Unlock()
 
 	if !rn.running {
+		rn.mu.Unlock()
 		return nil
 	}
 
@@ -185,6 +203,12 @@ func (rn *RedisNotifier) Unsubscribe() error {
 		_ = rn.sub.Close()
 	}
 
+	rn.mu.Unlock()
+
+	// 取消事件处理循环并等待退出
+	rn.workerCancel()
+	rn.wg.Wait()
+
 	rn.logger.InfoKV("Redis notifier unsubscribed", "channel", rn.config.Channel)
 	return nil
 }
@@ -194,9 +218,35 @@ func (rn *RedisNotifier) Close() error {
 	return rn.Unsubscribe()
 }
 
+// startEventLoop 启动事件处理循环
+// 使用 syncx.EventLoop 替代手写 select+recover，统一并发原语
+func (rn *RedisNotifier) startEventLoop() {
+	rn.wg.Add(1)
+	go func() {
+		defer rn.wg.Done()
+		syncx.NewEventLoop(rn.workerCtx).
+			OnChannel(rn.eventCh, func(event *ChangeEvent) {
+				rn.mu.RLock()
+				handler := rn.handler
+				rn.mu.RUnlock()
+				if handler != nil {
+					handler(event)
+				}
+			}).
+			OnPanic(func(r interface{}) {
+				rn.logger.ErrorKV("Redis event handler panic recovered",
+					"panic", fmt.Sprintf("%v", r))
+			}).
+			OnShutdown(func() {
+				rn.logger.InfoKV("Redis event loop shutdown")
+			}).
+			Run()
+	}()
+}
+
 // receiveLoop 消息接收循环
-// 持续从 Redis 订阅中读取消息，反序列化后调用 handler
-// 支持自动重连：当订阅断开时自动重新订阅
+// 持续从 Redis 订阅中读取消息，反序列化后非阻塞投递到 eventCh
+// 支持自动重连：当订阅断开时用 select+timer 等待重试（context 感知，不阻塞取消）
 func (rn *RedisNotifier) receiveLoop(ctx context.Context) {
 	for {
 		select {
@@ -216,8 +266,12 @@ func (rn *RedisNotifier) receiveLoop(ctx context.Context) {
 				"error", err.Error(),
 			)
 
-			// 等待后重试
-			time.Sleep(rn.config.RetryInterval)
+			// context 感知的重连等待，替代 time.Sleep
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(rn.config.RetryInterval):
+			}
 
 			// 重新订阅
 			rn.mu.Lock()
@@ -243,13 +297,14 @@ func (rn *RedisNotifier) receiveLoop(ctx context.Context) {
 			continue
 		}
 
-		// 调用事件处理器
-		rn.mu.RLock()
-		handler := rn.handler
-		rn.mu.RUnlock()
-
-		if handler != nil {
-			handler(&event)
+		// 非阻塞投递到 eventCh，缓冲区满时丢弃并告警（不阻塞消息接收）
+		select {
+		case rn.eventCh <- &event:
+		default:
+			rn.logger.WarnKV("Redis event buffer full, dropping event",
+				"event_type", string(event.Type),
+				"source", event.Source,
+			)
 		}
 	}
 }

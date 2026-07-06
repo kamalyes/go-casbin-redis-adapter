@@ -211,7 +211,8 @@ func NewAdapterWithConfig(opts *redis.Options, adapterOpts ...Option) (*Adapter,
 // 使用 contextx.OrBackground 确保 ctx 不为 nil
 
 // LoadPolicyWithCtx 从 Redis 加载所有策略规则
-// 通过 SMEMBERS 获取策略集合中的所有 Key，再逐个 GET 获取策略内容
+// 通过 SMEMBERS 获取策略集合中的所有 Key，再用 MGET 一次性获取所有策略内容
+// 将 N+1 次网络往返（SMEMBERS + N 次 GET）压缩为 2 次（SMEMBERS + MGET）
 func (a *Adapter) LoadPolicyWithCtx(ctx context.Context) ([]string, error) {
 	ctx = contextx.OrBackground(ctx)
 
@@ -221,18 +222,27 @@ func (a *Adapter) LoadPolicyWithCtx(ctx context.Context) ([]string, error) {
 		return nil, errors.NewPolicyLoadFailedError("smembers: " + err.Error())
 	}
 
-	// 逐个获取策略内容
+	if len(keys) == 0 {
+		return nil, nil
+	}
+
+	// 用 MGET 一次获取所有策略内容，将 N+1 次网络往返压缩为 1 次
+	values, err := a.client.MGet(ctx, keys...).Result()
+	if err != nil {
+		return nil, errors.NewPolicyLoadFailedError("mget: " + err.Error())
+	}
+
 	policies := make([]string, 0, len(keys))
-	for _, key := range keys {
-		val, err := a.client.Get(ctx, key).Result()
-		if err == redis.Nil {
+	for _, val := range values {
+		if val == nil {
 			// Key 已过期或不存在，跳过
 			continue
 		}
-		if err != nil {
-			return nil, errors.NewPolicyLoadFailedError("get: " + err.Error())
+		str, ok := val.(string)
+		if !ok {
+			continue
 		}
-		policies = append(policies, val)
+		policies = append(policies, str)
 	}
 
 	a.logger.InfoKV("Policies loaded from Redis", "count", len(policies))
