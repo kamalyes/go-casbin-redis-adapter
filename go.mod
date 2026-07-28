@@ -4,10 +4,10 @@ go 1.25.0
 
 require (
 	github.com/alicebob/miniredis/v2 v2.38.0
-	github.com/kamalyes/go-cachex v0.2.3
+	github.com/kamalyes/go-cachex v0.2.5
 	github.com/kamalyes/go-casbin v0.1.5
-	github.com/kamalyes/go-logger v0.5.3
-	github.com/kamalyes/go-toolbox v0.15.4-0.20260702123509-97fc880b05cd
+	github.com/kamalyes/go-logger v0.5.4
+	github.com/kamalyes/go-toolbox v0.15.5
 	github.com/redis/go-redis/v9 v9.18.0
 )
 
@@ -18,7 +18,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
-	github.com/kamalyes/go-argus v0.2.1 // indirect
+	github.com/kamalyes/go-argus v0.3.0 // indirect
 	github.com/yuin/gopher-lua v1.1.1 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	golang.org/x/crypto v0.50.0 // indirect
