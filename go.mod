@@ -4,10 +4,10 @@ go 1.25.0
 
 require (
 	github.com/alicebob/miniredis/v2 v2.38.0
-	github.com/kamalyes/go-cachex v0.3.3
+	github.com/kamalyes/go-cachex v0.3.4
 	github.com/kamalyes/go-casbin v0.1.5
-	github.com/kamalyes/go-logger v0.5.6
-	github.com/kamalyes/go-toolbox v0.15.6
+	github.com/kamalyes/go-logger v0.5.7
+	github.com/kamalyes/go-toolbox v0.15.8
 	github.com/redis/go-redis/v9 v9.18.0
 )
 
