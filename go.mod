@@ -6,7 +6,7 @@ require (
 	github.com/alicebob/miniredis/v2 v2.38.0
 	github.com/kamalyes/go-cachex v0.5.0
 	github.com/kamalyes/go-casbin v0.1.5
-	github.com/kamalyes/go-logger v0.9.0
+	github.com/kamalyes/go-logger v0.10.0
 	github.com/kamalyes/go-toolbox v0.19.2
 	github.com/redis/go-redis/v9 v9.18.0
 )
