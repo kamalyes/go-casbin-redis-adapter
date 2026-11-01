@@ -28,8 +28,8 @@ github.com/kamalyes/go-casbin v0.1.5 h1:WM1a+/vtsdKHOHSX6/U8MEUB+ijKHEhVbp96+TQw
 github.com/kamalyes/go-casbin v0.1.5/go.mod h1:jq2DQs7xaaJY5q4mElQgPaB2N+rcswLrujphNgo4LHY=
 github.com/kamalyes/go-logger v0.8.0 h1:0RnMc3K39UfZWh6Fs5O2UkzQ8Lp6Ip/oQRxofSJ2p8s=
 github.com/kamalyes/go-logger v0.8.0/go.mod h1:oesQGZo1gU8o5ECWdmNqqomi1F1XnpLMZYbgVJbB/pA=
-github.com/kamalyes/go-toolbox v0.18.1 h1:MrkD1oGluyL8QUH64O8QYPCZGQN/jxHwF8XkpEebbEU=
-github.com/kamalyes/go-toolbox v0.18.1/go.mod h1:dYMWxD6SGMct2GLzYRerqwrU8I1ZeyHoOWidkF0aA4I=
+github.com/kamalyes/go-toolbox v0.19.0 h1:nH4Zv6sfN9lqM+emebvxHJw/Wib7N4l/AXWibkIdROQ=
+github.com/kamalyes/go-toolbox v0.19.0/go.mod h1:dYMWxD6SGMct2GLzYRerqwrU8I1ZeyHoOWidkF0aA4I=
 github.com/klauspost/cpuid/v2 v2.2.7 h1:ZWSB3igEs+d0qvnxR/ZBzXVmxkgt8DdzP6m9pfuVLDM=
 github.com/klauspost/cpuid/v2 v2.2.7/go.mod h1:Lcz8mBdAVJIBVzewtcLocK12l3Y+JytZYpaMropDUws=
 github.com/kr/pretty v0.3.1 h1:flRD4NNwYAUpkphVc1HcthR4KEIFJ65n8Mw5qdRn3LE=
