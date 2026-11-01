@@ -82,6 +82,31 @@ func TestRedisNotifierPublishHelpers(t *testing.T) {
 	}
 }
 
+// waitSubscribed 等到服务端真的注册了订阅者再往下走
+//
+// go-redis 的 Subscribe 是惰性的：SUBSCRIBE 命令在首次使用时才发出，所以
+// notifier.Subscribe 返回**不代表**服务端已经注册。订阅没就绪时发出的消息会被直接丢掉，
+// 测试于是卡满超时再失败 —— 共享 CI runner 上比本地更容易撞上，这正是它在 CI 上红的原因
+//
+// miniredis 暴露了 PubSubNumSub，所以这里等的是「订阅者数 > 0」这个确定的事实，
+// 而不是 sleep 一个猜出来的时长
+//
+// [EN] go-redis subscribes lazily: the SUBSCRIBE command goes out on first use, so Subscribe
+// returning does not mean the server has registered it, and a message published before then is
+// dropped. miniredis exposes PubSubNumSub, so this waits on the actual fact rather than sleeping
+// for a guessed duration
+func waitSubscribed(t *testing.T, server *miniredis.Miniredis, channel string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if server.PubSubNumSub(channel)[channel] > 0 {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("等了 3 秒，服务端仍未注册频道 %q 的订阅者", channel)
+}
+
 func TestRedisNotifierSubscribeReceivesOtherSource(t *testing.T) {
 	server := miniredis.RunT(t)
 	clientA := redis.NewClient(&redis.Options{Addr: server.Addr()})
@@ -109,6 +134,9 @@ func TestRedisNotifierSubscribeReceivesOtherSource(t *testing.T) {
 	defer func() {
 		_ = sub.Close()
 	}()
+
+	// 发布之前先确认订阅已在服务端就绪，否则消息会丢
+	waitSubscribed(t, server, "test:policy")
 
 	if err := pub.PublishPolicyAdded(context.Background(), "p", []string{"alice"}); err != nil {
 		t.Fatalf("PublishPolicyAdded() error = %v", err)
