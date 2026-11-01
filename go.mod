@@ -7,7 +7,7 @@ require (
 	github.com/kamalyes/go-cachex v0.5.0
 	github.com/kamalyes/go-casbin v0.1.5
 	github.com/kamalyes/go-logger v0.9.0
-	github.com/kamalyes/go-toolbox v0.19.0
+	github.com/kamalyes/go-toolbox v0.19.1
 	github.com/redis/go-redis/v9 v9.18.0
 )
 
@@ -18,7 +18,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
-	github.com/kamalyes/go-argus v0.5.0 // indirect
+	github.com/kamalyes/go-argus v0.5.1 // indirect
 	github.com/yuin/gopher-lua v1.1.1 // indirect
 	go.opentelemetry.io/otel v1.44.0 // indirect
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
